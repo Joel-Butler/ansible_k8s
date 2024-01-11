@@ -1,0 +1,95 @@
+- name: K8s worker and master nodes pre-config
+  hosts: all
+  tasks:
+    - name: Add hostname to /etc/hosts
+      become: true
+      become_user: root
+      vars:
+        comment: '# added by ansible'
+      ansible.builtin.lineinfile:
+        dest: /etc/hosts
+        regexp: "127[.]0[.]0[.]1.*"
+        line: "127.0.0.1 localhost.localdomain localhost {{ ansible_hostname }} {{ comment }}"
+        state: present
+        backup: true
+    - name: Add Ansible inventory mappings to /etc/hosts
+      become: true
+      become_user: root
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        block: |
+          {% for host in groups['all'] %}
+          {{ hostvars[host].ansible_host }} {{ host }}
+          {% endfor %}
+    - name: Harden SSHD
+      become: true
+      become_user: root
+      ansible.builtin.template:
+        src: sshd-49-defaults.conf
+        dest: /etc/ssh/sshd_config.d/49-sshd-defaults.conf
+        mode: "0600"
+        validate: /usr/sbin/sshd -t -f %s
+      notify: Reload SSHD
+    - name: Disable swap
+      become: true
+      become_user: root
+      ansible.builtin.command: sudo swapoff -a
+      changed_when: ansible_swaptotal_mb > 0
+      when: ansible_swaptotal_mb > 0
+    - name: Overlay Module already loaded?
+      ansible.builtin.raw: cat /proc/modules | grep -c overlay
+      ignore_errors: true
+      register: jb_module_overlay
+      changed_when: jb_module_overlay == 0
+    - name: Br_netfilter Module already loaded?
+      ansible.builtin.raw: cat /proc/modules | grep -c overlay
+      register: jb_module_br_netfilter
+      ignore_errors: true
+      changed_when: jb_module_br_netfilter == 0
+    - name: Containerd module settings
+      become: true
+      become_user: root
+      ansible.builtin.template:
+        src: containerd.conf
+        dest: /etc/modules-load.d/containerd.conf
+        mode: "0644"
+    - name: Load modules as configured in template
+      become: true
+      become_user: root
+      ansible.builtin.command: modprobe overlay && modprobe br_netfilter
+      when: jb_module_overlay == 0 or jb_module_br_netfilter == 0
+      changed_when: jb_module_overlay == 0 or jb_module_br_netfilter == 0
+    - name: Set kubernetes template
+      become: true
+      become_user: root
+      ansible.builtin.template:
+        src: kubernetes.conf
+        dest: /etc/sysctl.d/kubernetes.conf
+        mode: "0644"
+      notify:
+        - Reload sysctl system
+    - name: Deploy dependency libraries and apps via apt.
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        pkg:
+          - curl
+          - gnupg2
+          - software-properties-common
+          - apt-transport-https
+          - ca-certificates
+          - nfs-client
+        state: latest
+        only_upgrade: true
+  handlers:
+    - name: Reload sysctl system
+      become: true
+      become_user: root
+      ansible.builtin.command: sudo sysctl --system
+      changed_when: jb_module_overlay == 0 or jb_module_br_netfilter == 0
+    - name: Reload SSHD
+      become: true
+      become_user: root
+      ansible.builtin.systemd_service:
+        name: ssh
+        state: reloaded

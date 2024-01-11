@@ -1,0 +1,40 @@
+# Creates a custom ansible user and deploys the associated public key.
+# Assumes you already have a user with elevated access to the console
+# and have passed this to the ansible command.
+# Note: If you have embeeded the ansible user in your hosts file, be sure to
+#   replace this using -e "ansible_user=<your username>," I've observed that
+#   -u <username> is earlier in variable priority and results in failure.
+#   Also ensure you pass a hashed password.. -e 'userpwdHash=<Hash>'
+#   Literal quotes are important as otherwise you're likely to end
+#   up with an unknown password.
+- name: Ansible deploymet
+  hosts: all
+  tasks:
+    - name: Create Ansible user
+      become: true
+      become_user: root
+      ansible.builtin.user:
+        name: ansible
+        groups: adm,sudo,users,netdev,gpio,spi
+        shell: /bin/bash
+        generate_ssh_key: true
+        password: "{{ userpwdHash }}"
+    - name: Install ACL if not present
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        pkg: acl
+    - name: Allow passwordless sudo for the ansible user
+      become: true
+      become_user: root
+      ansible.builtin.template:
+        src: ansible-sudo.conf
+        dest: /etc/sudoers.d/91-ansible
+        mode: "0600"
+    - name: Add SSH pubkey
+      become: true
+      become_user: ansible
+      ansible.builtin.template:
+        src: ansible-ssh-key.conf
+        dest: ~/.ssh/authorized_keys
+        mode: "0600"
