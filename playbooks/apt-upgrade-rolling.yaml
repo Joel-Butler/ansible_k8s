@@ -9,7 +9,6 @@
         upgrade: dist
         update_cache: true
         cache_valid_time: 86400 # One day
-      notify: Run Reboot
     - name: Check if reboot required
       ansible.builtin.stat:
         path: /var/run/reboot-required
