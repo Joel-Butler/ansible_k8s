@@ -1,6 +1,17 @@
 - name: K8s worker and master nodes pre-config
   hosts: all
   tasks:
+    - name: Disable Cloud /etc/host rewrite
+      become: true
+      become_user: root
+      vars:
+        comment: "# disabled by ansible"
+      ansible.builtin.lineinfile:
+        dest: /etc/cloud/cloud.cfg
+        regexp: '^\s*- update_etc_hosts'
+        line: "#  - update_etc_hosts"
+        state: present
+        backup: true
     - name: Add hostname to /etc/hosts
       become: true
       become_user: root
@@ -79,8 +90,8 @@
           - apt-transport-https
           - ca-certificates
           - nfs-client
+          - linux-modules-extra-raspi
         state: latest
-        only_upgrade: true
   handlers:
     - name: Reload sysctl system
       become: true

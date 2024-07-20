@@ -1,0 +1,99 @@
+- name: K8s Master nodes Pre-upgrade for kubeadm
+  hosts: masters
+  tasks:
+    - name: Containerd
+      block:
+        - name: Containerd key
+          become: true
+          become_user: root
+          ansible.builtin.get_url:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            dest: /etc/apt/keyrings/containerd.asc
+            mode: "0644"
+        - name: Containerd
+          become: true
+          become_user: root
+          ansible.builtin.apt_repository:
+          # yamllint disable-line rule:line-length
+            repo: "deb [arch=arm64 signed-by=/etc/apt/keyrings/containerd.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+            state: present
+    - name: K8s
+      block:
+        - name: K8s key
+          # Note - documentation suggests key remains static - need to validate this.
+          become: true
+          become_user: root
+          ansible.builtin.get_url:
+            url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
+            dest: /etc/apt/keyrings/k8s.asc
+            mode: "0644"
+        - name: K8s Remove 1.29
+          become: true
+          become_user: root
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
+            state: absent
+            mode: "0644"
+        - name: K8s Install 1.30
+          become: true
+          become_user: root
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
+            state: present
+            mode: "0644"
+    - name: Install Containerd.io
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        pkg:
+          - containerd.io
+      notify:
+        - Configure Containerd
+    - name: Unhold kubeadm
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubeadm
+        selection: install
+    - name: Upgrade kubeadm
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        pkg:
+          - kubeadm=1.30.3-1.1
+      notify:
+        - Hold kubeadm
+  handlers:
+    - name: Configure Containerd
+      become: true
+      become_user: root
+      ansible.builtin.raw: |
+        containerd config default | tee /etc/containerd/config.toml >/dev/null 2>&1
+        sed -i 's/SystemdCgroup \= false/SystemdCgroup \= true/g' /etc/containerd/config.toml
+      notify: Enable and Restart Containerd
+      changed_when: true
+    - name: Enable and Restart Containerd
+      become: true
+      become_user: root
+      ansible.builtin.systemd_service:
+        name: containerd
+        enabled: true
+        state: restarted
+    - name: Hold kubelet
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubelet
+        selection: hold
+    - name: Hold kubeadm
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubeadm
+        selection: hold
+    - name: Hold kubectl
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubectl
+        selection: hold

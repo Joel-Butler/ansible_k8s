@@ -20,17 +20,25 @@
     - name: K8s
       block:
         - name: K8s key
+          # Note - documentation suggests key remains static - need to validate this.
           become: true
           become_user: root
           ansible.builtin.get_url:
             url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
             dest: /etc/apt/keyrings/k8s.asc
             mode: "0644"
-        - name: K8s Install
+        - name: K8s Remove 1.29
           become: true
           become_user: root
           ansible.builtin.apt_repository:
             repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
+            state: absent
+            mode: "0644"
+        - name: K8s Install 1.30
+          become: true
+          become_user: root
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
             state: present
             mode: "0644"
     - name: Install Containerd.io
@@ -41,19 +49,37 @@
           - containerd.io
       notify:
         - Configure Containerd
-
+    - name: Unhold Kubelet
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubelet
+        selection: install
+    - name: Unhold kubeadm
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubeadm
+        selection: install
+    - name: Unhold Kubectl
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubectl
+        selection: install
     - name: Install Kubernetes
       become: true
       become_user: root
       ansible.builtin.apt:
         pkg:
-          - kubelet
-          - kubeadm
-          - kubectl
+          - kubelet=1.30.3-1.1
+          - kubeadm=1.30.3-1.1
+          - kubectl=1.30.3-1.1
       notify:
         - Hold kubelet
         - Hold kubeadm
         - Hold kubectl
+        - Reload kubelet
   handlers:
     - name: Configure Containerd
       become: true
@@ -88,3 +114,10 @@
       ansible.builtin.dpkg_selections:
         name: kubectl
         selection: hold
+    - name: Reload kubelet
+      become: true
+      become_user: root
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+        name: kubelet
+        state: restarted
