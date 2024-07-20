@@ -1,0 +1,64 @@
+- name: K8s Worker and Master nodes Kubernetes installation
+  hosts: all
+  tasks:
+    - name: Containerd
+      block:
+        - name: Containerd key
+          become: true
+          become_user: root
+          ansible.builtin.get_url:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            dest: /etc/apt/keyrings/containerd.asc
+            mode: "0644"
+        - name: Containerd
+          become: true
+          become_user: root
+          ansible.builtin.apt_repository:
+          # yamllint disable-line rule:line-length
+            repo: "deb [arch=arm64 signed-by=/etc/apt/keyrings/containerd.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+            state: present
+    - name: K8s
+      block:
+        - name: K8s key
+          # Note - documentation suggests key remains static - need to validate this.
+          become: true
+          become_user: root
+          ansible.builtin.get_url:
+            url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
+            dest: /etc/apt/keyrings/k8s.asc
+            mode: "0644"
+        - name: K8s Remove 1.29
+          become: true
+          become_user: root
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
+            state: absent
+            mode: "0644"
+        - name: K8s Install 1.30
+          become: true
+          become_user: root
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
+            state: present
+            mode: "0644"
+    - name: Unhold Kubectl
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubectl
+        selection: install
+    - name: Install Kubernetes
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        pkg:
+          - kubectl=1.30.3-1.1
+      notify:
+        - Hold kubectl
+  handlers:
+    - name: Hold kubectl
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubectl
+        selection: hold
