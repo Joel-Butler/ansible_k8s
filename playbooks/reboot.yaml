@@ -1,0 +1,8 @@
+- name: Reboot workers time!
+  hosts: workers-excl-5
+  tasks:
+    - name: reboot and confirm back up
+      become: true
+      become_user: root
+      ansible.builtin.reboot:
+        reboot_timeout: 3600

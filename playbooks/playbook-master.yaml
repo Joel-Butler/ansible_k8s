@@ -1,4 +1,4 @@
 - name: Run Pre-Config
   ansible.builtin.import_playbook: pre-config-all.yaml
 - name: Run Kubernetes install
-  ansible.builtin.import_playbook: install-kubernetes.yaml
+  ansible.builtin.import_playbook: install_upgrade-kubernetes.yaml

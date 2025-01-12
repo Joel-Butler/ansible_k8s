@@ -24,7 +24,7 @@
           become: true
           become_user: root
           ansible.builtin.get_url:
-            url: https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key
+            url: https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key
             dest: /etc/apt/keyrings/k8s.asc
             mode: "0644"
         - name: K8s Remove 1.29
@@ -34,13 +34,29 @@
             repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
             state: absent
             mode: "0644"
-        - name: K8s Install 1.30
+        - name: K8s Remove 1.30
           become: true
           become_user: root
           ansible.builtin.apt_repository:
             repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
+            state: absent
+            mode: "0644"
+        - name: K8s Remove 1.31
+          become: true
+          become_user: root
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /"
+            state: absent
+            mode: "0644"
+        - name: K8s Install 1.32
+          become: true
+          become_user: root
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /"
             state: present
             mode: "0644"
+      tags: 
+        - updatek8sbin
     - name: Install Containerd.io
       become: true
       become_user: root
@@ -52,16 +68,19 @@
     - name: Unhold Kubelet
       become: true
       become_user: root
+      ignore_errors: True
       ansible.builtin.dpkg_selections:
         name: kubelet
         selection: install
     - name: Unhold kubeadm
+      ignore_errors: True
       become: true
       become_user: root
       ansible.builtin.dpkg_selections:
         name: kubeadm
         selection: install
     - name: Unhold Kubectl
+      ignore_errors: True
       become: true
       become_user: root
       ansible.builtin.dpkg_selections:
@@ -72,21 +91,25 @@
       become_user: root
       ansible.builtin.apt:
         pkg:
-          - kubelet=1.30.3-1.1
-          - kubeadm=1.30.3-1.1
-          - kubectl=1.30.3-1.1
+          - kubelet=1.32.0-1.1
+          - kubeadm=1.32.0-1.1
+          - kubectl=1.32.0-1.1
       notify:
         - Hold kubelet
         - Hold kubeadm
         - Hold kubectl
         - Reload kubelet
   handlers:
+      #Moved from raw to template file... cleaner
     - name: Configure Containerd
       become: true
       become_user: root
-      ansible.builtin.raw: |
-        containerd config default | tee /etc/containerd/config.toml >/dev/null 2>&1
-        sed -i 's/SystemdCgroup \= false/SystemdCgroup \= true/g' /etc/containerd/config.toml
+      ansible.builtin.template: 
+        src: etc-containerd-config.toml.j2
+        dest: /etc/containerd/config.toml
+        owner: "root"
+        group: "root"
+        mode: "0644"
       notify: Enable and Restart Containerd
       changed_when: true
     - name: Enable and Restart Containerd

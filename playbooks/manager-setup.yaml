@@ -1,0 +1,136 @@
+#Playbook to install all necessary utilites to manage a cluster to an
+#ubuntu image.
+#Assumes pre-existing network connectivity to the K8s control pane
+# and valid secrets stored in Doppler.
+- name: K8s Manager Setup
+  hosts: managers
+  vars_files:
+    - vars/myrepos.yaml
+  tasks:
+    - name: Install Prerequisites
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        pkg:
+          - build-essential
+    - name: Remove older apt repo copy of items we'll rebuild
+      become: True
+      become_user: root
+      ansible.builtin.apt:
+        pkg:
+          - golang
+        state: absent
+    - name: Install Additional repos
+      block:
+        - name: Kubernetes Repo
+          become: True
+          become_user: root
+          loop: "{{ k8sRepos }}"
+          ansible.builtin.deb822_repository:
+            name: "kubernetes-{{item.name}}"
+            types: [deb]
+            uris: "{{ item.url }}"
+            signed_by: "{{ item.key }}"
+            suites: "{{ item.suites }}"
+            components: "{{ item.components }}"
+            state: "{{ item.state }}"
+            enabled: yes
+        - name: Doppler
+          become: True
+          become_user: root
+          ansible.builtin.deb822_repository:
+            name: doppler
+            types: [deb]
+            uris: "{{ dopplerRepo.url }}"
+            signed_by: "{{ dopplerRepo.key }}"
+            suites: "{{ dopplerRepo.suites }}"
+            components: "{{ dopplerRepo.components }}"
+            state: "{{ dopplerRepo.state }}"
+            enabled: yes
+        - name: Helm
+          become: True
+          become_user: root
+          ansible.builtin.deb822_repository:
+            name: Helm
+            types: [deb]
+            uris: "{{ helmRepo.url }}"
+            signed_by: "{{ helmRepo.key }}"
+            suites: "{{ helmRepo.suites }}"
+            components: "{{ helmRepo.components }}"
+            state: "{{ helmRepo.state }}"
+            enabled: yes
+    - name: Unhold kubectl (if required)
+      ignore_errors: true
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubectl
+        selection: install
+    - name: Install Kubectl, Doppler and Helm
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        pkg:
+          - kubectl=1.32.0-1.1
+          - doppler
+          - helm
+        state: present
+    - name: Check if Go is up to date
+      ansible.builtin.command: 
+        cmd: "/usr/local/bin/go version"
+      register: goVer
+    - name: Download and install up to date golang
+      when: "goVer.stdout | regex_search( 'go1.23.4', multiline=True) is none "
+      block:
+        - name: get architecture
+          become: True
+          become_user: root
+          ansible.builtin.command: dpkg --print-architecture
+          register: dpkgoutpt
+        - name: Download and extract golang
+          become: True
+          become_user: root
+          ansible.builtin.unarchive:
+            src: "https://go.dev/dl/go1.23.4.linux-{{ dpkgoutpt.stdout }}.tar.gz"
+            remote_src: true
+            dest: /usr/local
+        - name: add to path
+          ansible.builtin.blockinfile:
+            path: "{{ ansible_env.HOME }}/.bashrc"
+            block: |
+              export PATH=$PATH:/usr/local/go/bin:{{ ansible_env.HOME }}/bin
+        - name: symlink go
+          become: true
+          become_user: root
+          ansible.builtin.file:
+            state: link
+            src: /usr/local/go/bin/go
+            path: /usr/local/bin/go
+    - name: check for k9s
+      ansible.builtin.stat:
+        path: "{{ ansible_env.HOME }}/bin/k9s"
+      register: k9sStat
+    - name: Build and install K9s
+      when: not k9sStat.stat.exists
+      block:
+        - name: Clone K9s repo
+          ansible.builtin.git:
+            repo: https://github.com/derailed/k9s.git
+            dest: "{{ ansible_env.HOME }}/src/k9s"
+            version: v0.32.7
+        - name: build K9s
+          community.general.make:
+            chdir: "{{ ansible_env.HOME }}/src/k9s"
+            target: build
+        - name: Install K9s
+          ansible.builtin.copy: 
+            src: "{{ ansible_env.HOME }}/src/k9s/execs/k9s"
+            dest: "{{ ansible_env.HOME }}/bin/"
+            mode: "0755"
+            owner: "{{ ansible_env.USER }}"
+            group: "{{ ansible_env.USER }}"
+            remote_src: true
+    
+
+
+
