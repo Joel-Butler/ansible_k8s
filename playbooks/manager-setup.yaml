@@ -6,6 +6,7 @@
   hosts: managers
   vars_files:
     - vars/myrepos.yaml
+    - vars/golang.yaml
   tasks:
     - name: Install Prerequisites
       become: true
@@ -59,6 +60,11 @@
             components: "{{ helmRepo.components }}"
             state: "{{ helmRepo.state }}"
             enabled: yes
+    - name: refresh apt repos
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        update_cache: yes
     - name: Unhold kubectl (if required)
       ignore_errors: true
       become: true
@@ -76,11 +82,12 @@
           - helm
         state: present
     - name: Check if Go is up to date
+      ignore_errors: true
       ansible.builtin.command: 
         cmd: "/usr/local/bin/go version"
       register: goVer
     - name: Download and install up to date golang
-      when: "goVer.stdout | regex_search( 'go1.23.4', multiline=True) is none "
+      when: "goVer.stdout | regex_search( golang.version, multiline=True) is none "
       block:
         - name: get architecture
           become: True
@@ -91,7 +98,7 @@
           become: True
           become_user: root
           ansible.builtin.unarchive:
-            src: "https://go.dev/dl/go1.23.4.linux-{{ dpkgoutpt.stdout }}.tar.gz"
+            src: "{{ golang.url }}/{{ golang.version }}.linux-{{ dpkgoutpt.stdout }}.tar.gz"
             remote_src: true
             dest: /usr/local
         - name: add to path

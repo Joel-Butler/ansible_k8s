@@ -1,0 +1,13 @@
+- name: Wireguard installer
+  hosts: local
+  vars_files:
+
+  tasks:
+    - name: install wireguard
+      become: true
+      become_user: root
+      ansible.builtin.apt: 
+        pkg:
+          - wireguard
+# todo... 
+#    - name: configure network

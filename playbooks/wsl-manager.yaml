@@ -1,0 +1,13 @@
+#Playbook to install all necessary utilites to manage a cluster to a
+#wsl ubuntu image.
+# Leverages doppler for secrets and assumes availability to connect to
+# wireguard.
+
+- name: K8s WSL Manager Setup Master Playbook
+  hosts: local
+  vars_files:
+    - vars/myrepos.yaml
+- name: Run general config
+  ansible.builtin.import_playbook: manager-setup.yaml
+- name: Install and configure wireguard
+  ansible.builtin.import_playbook: wireguard
