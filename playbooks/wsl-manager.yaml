@@ -9,5 +9,5 @@
     - vars/myrepos.yaml
 - name: Run general config
   ansible.builtin.import_playbook: manager-setup.yaml
-- name: Install and configure wireguard
-  ansible.builtin.import_playbook: wireguard
+- name: Preload all common helm charts 
+  ansible.builtin.import_playbook: helm-repos.yaml

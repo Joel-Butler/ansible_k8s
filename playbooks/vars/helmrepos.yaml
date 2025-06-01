@@ -1,0 +1,19 @@
+helm:
+  repos: 
+    cilium:
+      repo: https://helm.cilium.io/
+    jbk8s: 
+      repo: https://joel-butler.github.io/k8s-charts/
+    grafana:
+      repo: https://grafana.github.io/helm-charts
+    jetstack:
+      repo: https://charts.jetstack.io
+    nfs-subdir-external-provisioner: 
+      repo: https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner
+    external-secrets:
+      repo: https://charts.external-secrets.io
+    fluent:
+      repo: https://fluent.github.io/helm-charts
+    prometheus-community:
+      repo: https://prometheus-community.github.io/helm-charts
+  helm_version: "BuildInfo{Version:\"v3"

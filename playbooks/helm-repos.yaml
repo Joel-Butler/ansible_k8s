@@ -1,0 +1,22 @@
+- name: Helm Repo installer Playbook
+  vars_files:
+    - vars/helmrepos.yaml
+  hosts: helm-operators
+  tasks:
+    - name: Check if Helm is present and a supported version
+      ansible.builtin.command: helm version
+      register: helm_version_output
+      ignore_errors: true
+    - name: debug helm output
+      ansible.builtin.debug:
+        msg: "Helm Version matches? {{ helm_version_output.stdout | regex_search(helm.helm_version) }}"
+    - name: Helm chart provisoining steps
+      block: 
+        - name: Add repos from variable list
+          loop: "{{ lookup('ansible.builtin.dict', helm.repos) }}"
+          kubernetes.core.helm_repository: 
+            name: "{{ item.key }}"
+            repo_url: "{{ item.value.repo }}"
+        - name: Refresh repo list
+          ansible.builtin.command: helm repo update
+      when: helm_version_output.stdout | regex_search(helm.helm_version) == helm.helm_version
