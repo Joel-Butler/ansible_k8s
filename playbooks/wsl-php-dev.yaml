@@ -1,0 +1,81 @@
+# WSL-Manager + PHP
+- name: K8s WSL Manager Setup Master Playbook
+  hosts: local
+  vars_files:
+    - vars/myrepos.yaml
+- name: Run general config
+  ansible.builtin.import_playbook: manager-setup.yaml
+- name: Preload all common helm charts 
+  ansible.builtin.import_playbook: helm-repos.yaml
+- name: Install PHPEnv, NVM and PHPBuild + Deps
+  hosts: local
+  tasks: 
+    - name: Build components
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        pkg:
+          - build-essential
+          - autoconf 
+          - bison 
+          - re2c 
+          - libxml2-dev 
+          - libsqlite3-dev 
+          - libcurl4-openssl-dev 
+          - libjpeg-dev 
+          - libpng-dev 
+          - libwebp-dev 
+          - libzip-dev 
+          - libonig-dev 
+          - libsodium-dev 
+          - libssl-dev 
+          - libreadline-dev 
+          - libtidy-dev 
+          - libxslt1-dev 
+          - libicu-dev 
+          - libfreetype6-dev 
+          - libmagickwand-dev 
+          - libgmp-dev 
+          - libmemcached-dev
+    - name: PHPEnv
+      ansible.builtin.git:
+        repo: https://github.com/phpenv/phpenv.git
+        dest: "{{ ansible_env.HOME }}/.phpenv"
+        version: adc99a7
+    - name: PHPBuild
+      ansible.builtin.git:
+        repo: https://github.com/php-build/php-build.git
+        dest: "{{ ansible_env.HOME }}/.phpenv/plugins/php-build"
+        version: 98c5caa
+    - name: Install PHP 8.3.28
+      ansible.builtin.shell: | 
+        export PATH="$HOME/.phpenv/bin:$PATH"
+        eval "$(phpenv init -)"
+        export PHP_BUILD_CONFIGURE_OPTS="--with-sodium"
+        phpenv install 8.3.28
+        phpenv rehash
+        phpenv global 8.3.28
+    - name: install NVM
+      ansible.builtin.git:
+        repo: https://github.com/nvm-sh/nvm.git
+        dest: "{{ ansible_env.HOME }}/.nvm"
+        version: "v0.40.3"
+        recursive: false
+    - name: Update profile
+      ansible.builtin.blockinfile:
+        block: |
+          #PHPENV
+          export PATH="$HOME/.phpenv/bin:$PATH"
+          eval "$(phpenv init -)"
+
+          #NVM
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+          [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+        path: "{{ ansible_env.HOME }}/.profile"
+    - name: Install Node v24.11.0 and devspace
+      ansible.builtin.shell: |
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+        nvm install v24.11.0
+        npm install -g devspace

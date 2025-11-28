@@ -48,11 +48,18 @@
             repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /"
             state: absent
             mode: "0644"
-        - name: K8s Install 1.32
+        - name: K8s remove 1.32
           become: true
           become_user: root
           ansible.builtin.apt_repository:
             repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /"
+            state: absent
+            mode: "0644"
+        - name: K8s Install 1.33
+          become: true
+          become_user: root
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /"
             state: present
             mode: "0644"
       tags: 
@@ -91,14 +98,24 @@
       become_user: root
       ansible.builtin.apt:
         pkg:
-          - kubelet=1.32.0-1.1
-          - kubeadm=1.32.0-1.1
-          - kubectl=1.32.0-1.1
+          - kubelet=1.33.5-1.1
+          - kubeadm=1.33.5-1.1
+          - kubectl=1.33.5-1.1
+      notify:
+        - Reload kubelet
+    - name: Run Node upgrades
+      become: true
+      become_user: root
+      when: inventory_hostname in groups["workers"]
+      ansible.builtin.command:
+        cmd: kubeadm upgrade node
+    - name: Hold kube versions after run
+      ansible.builtin.debug:
+        msg: holding kuelet, kubeadm and kubectl
       notify:
         - Hold kubelet
         - Hold kubeadm
         - Hold kubectl
-        - Reload kubelet
   handlers:
       #Moved from raw to template file... cleaner
     - name: Configure Containerd

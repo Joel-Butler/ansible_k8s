@@ -26,5 +26,3 @@ workers-excl-5:
       ansible_host: 192.168.88.204
 all: 
   vars:
-    #    ansible_user: ansible
-    # ansible_pubkey: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDCsA6nCXHOihFREeNRTBQG9MoQOTfqQd3SDR5GrCKlr74F3SHpezv1Q9vNyENYr7d47AsC7XzOSZlKZwlLSxOcKrDk3qh2pRghZkMyBV2sIoI0mT72dFlf5JbyaPe8ybuD20pIVX5/BjtApkkEXG/nn0oK/KepEHcym7PHsXHOL4wAnfg47k7wZtxg7UdYzm7C1dS3RhjQpypn4FcRBa/WFJ1enDeCknQKNw2fL3V1Gyb/cmJHXKkebALkhIvyQ+cph0GiCRksgOCV8E8sLXykuuE5l+D9r5gt64vK8HlgcfZtbgo6JQdmGZXCJHUfNnXkt+pNQR3UGsLsZ6EyczAjAgRjYY2/TnEobaNbiPO+yerZstX3he/pl9nEuIfRwtvaQ0EcnqhgbATIBcYkJUoNfA9SuKSN0FSUTkMX0PIElzh24qZgOBUu2CoWjKJsND6KCPMpqFhDy+FwtaIIvhPy+u4ZmtVAI0dV3SKvw4nr7+8Ux0DoW1jw8r7Bb8wSQKk= jbutler@k8smanager

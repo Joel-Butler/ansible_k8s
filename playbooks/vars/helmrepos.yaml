@@ -16,4 +16,6 @@ helm:
       repo: https://fluent.github.io/helm-charts
     prometheus-community:
       repo: https://prometheus-community.github.io/helm-charts
+    argo:
+      repo: https://argoproj.github.io/argo-helm
   helm_version: "BuildInfo{Version:\"v3"

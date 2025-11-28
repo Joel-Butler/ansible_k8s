@@ -1,0 +1,6 @@
+masters:
+  hosts:
+    k8s-master:
+      ansible_host: 192.168.88.200
+all: 
+  vars:
