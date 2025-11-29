@@ -37,6 +37,11 @@
           - libmagickwand-dev 
           - libgmp-dev 
           - libmemcached-dev
+          - docker-ce 
+          - docker-ce-cli 
+          - containerd.io 
+          - docker-buildx-plugin 
+          - docker-compose-plugin
     - name: PHPEnv
       ansible.builtin.git:
         repo: https://github.com/phpenv/phpenv.git
