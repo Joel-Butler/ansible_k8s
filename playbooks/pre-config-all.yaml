@@ -1,27 +1,6 @@
 - name: K8s worker and master nodes pre-config
   hosts: all
   tasks:
-    - name: Adjust kernel boot parameters for RaspPI hosts
-      become: true
-      become_user: root
-      ansible.builtin.template: 
-        src: boot-firmware-cmdline.txt.conf
-        dest: /boot/firmware/cmdline.txt
-        mode: "0755"
-      notify: Reboot system
-    - name: Reboot systems if required
-      meta: flush_handlers
-    - name: Disable Cloud /etc/host rewrite
-      become: true
-      become_user: root
-      vars:
-        comment: "# disabled by ansible"
-      ansible.builtin.lineinfile:
-        dest: /etc/cloud/cloud.cfg
-        regexp: '^\s*- update_etc_hosts'
-        line: "#  - update_etc_hosts"
-        state: present
-        backup: true
     - name: Add hostname to /etc/hosts
       become: true
       become_user: root
@@ -30,7 +9,7 @@
       ansible.builtin.lineinfile:
         dest: /etc/hosts
         regexp: "127[.]0[.]0[.]1.*"
-        line: "127.0.0.1 localhost.localdomain localhost {{ ansible_hostname }} {{ comment }}"
+        line: "127.0.0.1 localhost.localdomain localhost {{ ansible_facts['hostname'] }} {{ comment }}"
         state: present
         backup: true
     - name: Add Ansible inventory mappings to /etc/hosts
@@ -59,13 +38,13 @@
       when: ansible_swaptotal_mb > 0
     - name: Overlay Module already loaded?
       ansible.builtin.raw: cat /proc/modules | grep -c overlay
-      ignore_errors: true
+      failed_when: false
       register: jb_module_overlay
       changed_when: jb_module_overlay == 0
     - name: Br_netfilter Module already loaded?
-      ansible.builtin.raw: cat /proc/modules | grep -c overlay
+      ansible.builtin.raw: cat /proc/modules | grep -c br_netfilter
       register: jb_module_br_netfilter
-      ignore_errors: true
+      failed_when: false
       changed_when: jb_module_br_netfilter == 0
     - name: Containerd module settings
       become: true

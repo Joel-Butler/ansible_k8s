@@ -103,9 +103,9 @@
             dest: /usr/local
         - name: add to path
           ansible.builtin.blockinfile:
-            path: "{{ ansible_env.HOME }}/.bashrc"
+            path: "{{ ansible_facts['env']['home'] }}/.bashrc"
             block: |
-              export PATH=$PATH:/usr/local/go/bin:{{ ansible_env.HOME }}/bin
+              export PATH=$PATH:/usr/local/go/bin:{{ ansible_facts['env']['home'] }}/bin
         - name: symlink go
           become: true
           become_user: root
@@ -115,7 +115,7 @@
             path: /usr/local/bin/go
     - name: check for k9s
       ansible.builtin.stat:
-        path: "{{ ansible_env.HOME }}/bin/k9s"
+        path: "{{ ansible_facts['env']['home'] }}/bin/k9s"
       register: k9sStat
     - name: Build and install K9s
       when: not k9sStat.stat.exists
@@ -123,16 +123,16 @@
         - name: Clone K9s repo
           ansible.builtin.git:
             repo: https://github.com/derailed/k9s.git
-            dest: "{{ ansible_env.HOME }}/src/k9s"
+            dest: "{{ ansible_facts['env']['home'] }}/src/k9s"
             version: v0.32.7
         - name: build K9s
           community.general.make:
-            chdir: "{{ ansible_env.HOME }}/src/k9s"
+            chdir: "{{ ansible_facts['env']['home'] }}/src/k9s"
             target: build
         - name: Install K9s
           ansible.builtin.copy: 
-            src: "{{ ansible_env.HOME }}/src/k9s/execs/k9s"
-            dest: "{{ ansible_env.HOME }}/bin/"
+            src: "{{ ansible_facts['env']['home'] }}/src/k9s/execs/k9s"
+            dest: "{{ ansible_facts['env']['home'] }}/bin/"
             mode: "0755"
             owner: "{{ ansible_env.USER }}"
             group: "{{ ansible_env.USER }}"

@@ -45,12 +45,12 @@
     - name: PHPEnv
       ansible.builtin.git:
         repo: https://github.com/phpenv/phpenv.git
-        dest: "{{ ansible_env.HOME }}/.phpenv"
+        dest: "{{ ansible_facts['env']['home'] }}/.phpenv"
         version: adc99a7
     - name: PHPBuild
       ansible.builtin.git:
         repo: https://github.com/php-build/php-build.git
-        dest: "{{ ansible_env.HOME }}/.phpenv/plugins/php-build"
+        dest: "{{ ansible_facts['env']['home'] }}/.phpenv/plugins/php-build"
         version: 98c5caa
     - name: Install PHP 8.3.28
       ansible.builtin.shell: | 
@@ -63,7 +63,7 @@
     - name: install NVM
       ansible.builtin.git:
         repo: https://github.com/nvm-sh/nvm.git
-        dest: "{{ ansible_env.HOME }}/.nvm"
+        dest: "{{ ansible_facts['env']['home'] }}/.nvm"
         version: "v0.40.3"
         recursive: false
     - name: Update profile
@@ -77,7 +77,7 @@
           export NVM_DIR="$HOME/.nvm"
           [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
           [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
-        path: "{{ ansible_env.HOME }}/.profile"
+        path: "{{ ansible_facts['env']['home'] }}/.profile"
     - name: Install Node v24.11.0 and devspace
       ansible.builtin.shell: |
         export NVM_DIR="$HOME/.nvm"

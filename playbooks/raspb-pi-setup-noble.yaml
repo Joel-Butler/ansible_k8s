@@ -1,0 +1,24 @@
+- name: K8s worker and master nodes pre-config
+  hosts: pi-workers:pi-masters
+  tasks:
+    - name: Adjust kernel boot parameters for RaspPI hosts
+      become: true
+      become_user: root
+      ansible.builtin.template: 
+        src: boot-firmware-cmdline.txt.conf
+        dest: /boot/firmware/cmdline.txt
+        mode: "0755"
+      notify: Reboot system
+    - name: Reboot systems if required
+      meta: flush_handlers
+    - name: Disable Cloud /etc/host rewrite
+      become: true
+      become_user: root
+      vars:
+        comment: "# disabled by ansible"
+      ansible.builtin.lineinfile:
+        dest: /etc/cloud/cloud.cfg
+        regexp: '^\s*- update_etc_hosts'
+        line: "#  - update_etc_hosts"
+        state: present
+        backup: true

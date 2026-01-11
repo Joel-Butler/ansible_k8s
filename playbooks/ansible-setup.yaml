@@ -7,7 +7,7 @@
 #   Also ensure you pass a hashed password.. -e 'userpwdHash=<Hash>'
 #   Literal quotes are important as otherwise you're likely to end
 #   up with an unknown password.
-- name: Ansible deploymet
+- name: Ansible deployment
   hosts: all
   tasks:
     - name: Create Ansible user

@@ -1,3 +1,5 @@
+- name: RaspPI pre-config
+  ansible.builtin.import_playbook: raspb-pi-setup-noble.yaml
 - name: Run Pre-Config
   ansible.builtin.import_playbook: pre-config-all.yaml
 - name: Run Kubernetes install
