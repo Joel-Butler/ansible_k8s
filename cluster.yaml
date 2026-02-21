@@ -16,6 +16,8 @@ workers:
       ansible_host: 192.168.88.205
     k8s-worker6:
       ansible_host: 192.168.88.206
+    k8s-worker7:
+      ansible_host: 192.168.88.207
 pi-masters:
   hosts:
     k8s-master:
@@ -36,6 +38,8 @@ x64-workers:
   hosts:
     k8s-worker6:
       ansible_host: 192.168.88.206
+    k8s-worker7:
+      ansible_host: 192.168.88.207
 workers-excl-5:
   hosts:
     k8s-worker1:
