@@ -101,7 +101,7 @@ When bumping the cluster version, you must update **three** things in [playbooks
 
 ## Validation
 
-Run `ansible-lint` on changed playbooks before considering work done. yamllint hints (e.g. `# yamllint disable-line rule:line-length`) appear inline; honour them.
+Run `uv run ansible-lint <changed-playbook>` before considering work done. yamllint hints (e.g. `# yamllint disable-line rule:line-length`) appear inline; honour them.
 
 ## Out of scope
 
