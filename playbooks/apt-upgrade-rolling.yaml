@@ -1,14 +1,59 @@
 - name: General update and rolling reboot
   hosts: all
-  serial: 2
+  serial: 1
+  vars:
+    jb_drain_host: k8s-master
   tasks:
+    - name: Update apt cache
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 86400 # One day
+
+    - name: Check for upgradable packages
+      ansible.builtin.command:
+        cmd: apt list --upgradable
+      register: jb_apt_upgradable
+      changed_when: false
+
+    - name: Determine whether upgrades are pending
+      ansible.builtin.set_fact:
+        jb_apt_has_upgrades: >-
+          {{ jb_apt_upgradable.stdout_lines
+             | reject('match', '^Listing')
+             | reject('equalto', '')
+             | list | length > 0 }}
+
+    - name: Cordon node before apt upgrade
+      ansible.builtin.command:
+        cmd: kubectl cordon {{ inventory_hostname }}
+      delegate_to: "{{ jb_drain_host }}"
+      changed_when: true
+      when:
+        - jb_apt_has_upgrades
+        - "'masters' not in group_names"
+
+    - name: Drain node before apt upgrade
+      ansible.builtin.command:
+        cmd: >-
+          kubectl drain {{ inventory_hostname }}
+          --ignore-daemonsets
+          --delete-emptydir-data
+          --timeout=10m
+      delegate_to: "{{ jb_drain_host }}"
+      changed_when: true
+      when:
+        - jb_apt_has_upgrades
+        - "'masters' not in group_names"
+
     - name: Update and upgrade apt packages
       become: true
       become_user: root
       ansible.builtin.apt:
         upgrade: dist
-        update_cache: true
-        cache_valid_time: 86400 # One day
+    - name: Reset SSH connection after apt upgrade
+      ansible.builtin.meta: reset_connection
     - name: Check if reboot required
       ansible.builtin.stat:
         path: /var/run/reboot-required
@@ -18,3 +63,24 @@
       become_user: root
       ansible.builtin.reboot:
       when: reboot_required_file.stat.exists
+
+    - name: Wait for node to become Ready in the cluster
+      ansible.builtin.command:
+        cmd: >-
+          kubectl wait --for=condition=Ready
+          node/{{ inventory_hostname }}
+          --timeout=10m
+      delegate_to: "{{ jb_drain_host }}"
+      changed_when: false
+      when:
+        - jb_apt_has_upgrades
+        - "'masters' not in group_names"
+
+    - name: Uncordon node after apt upgrade
+      ansible.builtin.command:
+        cmd: kubectl uncordon {{ inventory_hostname }}
+      delegate_to: "{{ jb_drain_host }}"
+      changed_when: true
+      when:
+        - jb_apt_has_upgrades
+        - "'masters' not in group_names"

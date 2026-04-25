@@ -1,0 +1,105 @@
+- name: Pre-upgrade apt dist-upgrade and reboot if required
+  ansible.builtin.import_playbook: apt-upgrade-rolling.yaml
+
+- name: Ubuntu LTS release upgrade (noble -> next)
+  hosts: all
+  serial: 1
+  vars:
+    jb_release_upgrade_target: noble
+    jb_release_upgrade_devel: false
+    jb_drain_host: k8s-master
+  tasks:
+    - name: Ensure update-manager-core is installed
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        name: update-manager-core
+        state: present
+
+    - name: Record current distribution release
+      ansible.builtin.set_fact:
+        jb_pre_upgrade_release: "{{ ansible_facts['distribution_release'] }}"
+
+    - name: Cordon node before release upgrade
+      ansible.builtin.command:
+        cmd: kubectl cordon {{ inventory_hostname }}
+      delegate_to: "{{ jb_drain_host }}"
+      changed_when: true
+      when:
+        - jb_pre_upgrade_release == jb_release_upgrade_target
+        - "'masters' not in group_names"
+
+    - name: Drain node before release upgrade
+      ansible.builtin.command:
+        cmd: >-
+          kubectl drain {{ inventory_hostname }}
+          --ignore-daemonsets
+          --delete-emptydir-data
+          --timeout=10m
+      delegate_to: "{{ jb_drain_host }}"
+      changed_when: true
+      when:
+        - jb_pre_upgrade_release == jb_release_upgrade_target
+        - "'masters' not in group_names"
+
+    - name: Run do-release-upgrade non-interactively
+      become: true
+      become_user: root
+      ansible.builtin.command:
+        cmd: >-
+          do-release-upgrade
+          -f DistUpgradeViewNonInteractive
+          {{ '-d' if jb_release_upgrade_devel else '' }}
+      register: jb_release_upgrade
+      async: 7200
+      poll: 60
+      changed_when: jb_release_upgrade.rc == 0
+      when: jb_pre_upgrade_release == jb_release_upgrade_target
+      notify:
+        - Reboot after release upgrade
+        - Re-gather facts after reboot
+
+    - name: Reset SSH connection after release upgrade
+      ansible.builtin.meta: reset_connection
+
+    - name: Flush handlers so reboot completes before post-upgrade tasks
+      ansible.builtin.meta: flush_handlers
+
+    - name: Wait for node to become Ready in the cluster
+      ansible.builtin.command:
+        cmd: >-
+          kubectl wait --for=condition=Ready
+          node/{{ inventory_hostname }}
+          --timeout=10m
+      delegate_to: "{{ jb_drain_host }}"
+      changed_when: false
+      when:
+        - jb_release_upgrade is changed
+        - "'masters' not in group_names"
+
+    - name: Uncordon node after release upgrade
+      ansible.builtin.command:
+        cmd: kubectl uncordon {{ inventory_hostname }}
+      delegate_to: "{{ jb_drain_host }}"
+      changed_when: true
+      when:
+        - jb_release_upgrade is changed
+        - "'masters' not in group_names"
+
+    - name: Show post-upgrade release
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} is now on
+          {{ ansible_facts['distribution'] }}
+          {{ ansible_facts['distribution_version'] }}
+          ({{ ansible_facts['distribution_release'] }})
+
+  handlers:
+    - name: Reboot after release upgrade
+      become: true
+      become_user: root
+      ansible.builtin.reboot:
+        reboot_timeout: 1800
+
+    - name: Re-gather facts after reboot
+      ansible.builtin.setup:

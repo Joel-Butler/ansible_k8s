@@ -50,5 +50,11 @@ workers-excl-5:
       ansible_host: 192.168.88.203
     k8s-worker4:
       ansible_host: 192.168.88.204
-all: 
+testers:
+  hosts:
+    k8s-worker2:
+      ansible_host: 192.168.88.202
+    k8s-worker6:
+      ansible_host: 192.168.88.206
+all:
   vars:
