@@ -2,3 +2,4 @@ hosts.yaml
 test-hosts.yaml
 .vscode
 .venv/
+.ansible/
