@@ -4,13 +4,13 @@
     - name: Adjust kernel boot parameters for RaspPI hosts
       become: true
       become_user: root
-      ansible.builtin.template: 
+      ansible.builtin.template:
         src: boot-firmware-cmdline.txt.conf
         dest: /boot/firmware/cmdline.txt
         mode: "0755"
       notify: Reboot system
     - name: Reboot systems if required
-      meta: flush_handlers
+      ansible.builtin.meta: flush_handlers
     - name: Disable Cloud /etc/host rewrite
       become: true
       become_user: root

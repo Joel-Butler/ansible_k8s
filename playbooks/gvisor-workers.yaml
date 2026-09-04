@@ -1,0 +1,383 @@
+- name: Enable gVisor on Kubernetes worker nodes
+  hosts: workers
+  serial: 1
+  vars_files:
+    - vars/k8s.yaml
+  tasks:
+    - name: Set gVisor package architecture fact
+      tags: always
+      ansible.builtin.set_fact:
+        jb_dpkg_arch: >-
+          {{ 'amd64' if ansible_facts['architecture'] == 'x86_64'
+             else ('arm64' if ansible_facts['architecture'] == 'aarch64'
+             else ansible_facts['architecture']) }}
+        jb_containerd_platform: >-
+          {{ 'linux/amd64' if ansible_facts['architecture'] == 'x86_64'
+             else ('linux/arm64/v8' if ansible_facts['architecture'] == 'aarch64'
+             else 'linux/' ~ ansible_facts['architecture']) }}
+
+    - name: Verify gVisor host prerequisites
+      tags:
+        - gvisor
+        - gvisor_preflight
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['architecture'] in ['x86_64', 'aarch64']
+          - ansible_facts['kernel'] is version('5.6', '>=')
+        fail_msg: >-
+          gVisor requires x86_64 or ARM64 and Linux 5.6 or newer; found
+          {{ ansible_facts['architecture'] }} with kernel {{ ansible_facts['kernel'] }}.
+
+    - name: Require Kubernetes kubeconfig for gVisor rollout
+      tags:
+        - gvisor
+        - gvisor_preflight
+      ansible.builtin.assert:
+        that:
+          - jb_kubeconfig is defined
+          - jb_kubeconfig | length > 0
+        fail_msg: >-
+          Set jb_kubeconfig to the absolute path of an administrator kubeconfig
+          on {{ jb_drain_host }} before running the gVisor rollout.
+
+    - name: Verify Kubernetes kubeconfig is available to the rollout controller
+      tags:
+        - gvisor
+        - gvisor_preflight
+      become: true
+      become_user: root
+      ansible.builtin.stat:
+        path: "{{ jb_kubeconfig }}"
+      delegate_to: "{{ jb_drain_host }}"
+      register: jb_gvisor_kubeconfig
+
+    - name: Require readable Kubernetes kubeconfig on the rollout controller
+      tags:
+        - gvisor
+        - gvisor_preflight
+      ansible.builtin.assert:
+        that:
+          - jb_gvisor_kubeconfig.stat.exists
+          - jb_gvisor_kubeconfig.stat.isreg
+        fail_msg: >-
+          Kubernetes kubeconfig {{ jb_kubeconfig }} is not a regular file on
+          {{ jb_drain_host }}.
+
+    - name: Check whether gVisor is already installed
+      tags:
+        - gvisor
+        - gvisor_preflight
+      ansible.builtin.command:
+        cmd: dpkg-query -W -f='${Status}' runsc
+      register: jb_gvisor_package_status
+      changed_when: false
+      failed_when: false
+
+    - name: Set gVisor installation state
+      tags:
+        - gvisor
+        - gvisor_preflight
+      ansible.builtin.set_fact:
+        jb_gvisor_already_installed: >-
+          {{ jb_gvisor_package_status.rc == 0 and
+             'install ok installed' in jb_gvisor_package_status.stdout }}
+
+    - name: Cordon worker before gVisor rollout
+      tags:
+        - gvisor
+        - gvisor_rollout
+      ansible.builtin.command:
+        cmd: kubectl cordon {{ inventory_hostname }}
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      environment:
+        KUBECONFIG: "{{ jb_kubeconfig }}"
+      changed_when: true
+      when: not jb_gvisor_already_installed
+
+    - name: Remove stale gVisor smoke Pod before drain
+      tags:
+        - gvisor
+        - gvisor_rollout
+      ansible.builtin.command:
+        cmd: kubectl delete pod gvisor-smoke --ignore-not-found
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      environment:
+        KUBECONFIG: "{{ jb_kubeconfig }}"
+      register: jb_gvisor_stale_smoke_delete
+      changed_when: "'deleted' in jb_gvisor_stale_smoke_delete.stdout"
+
+    - name: Drain worker before gVisor rollout
+      tags:
+        - gvisor
+        - gvisor_rollout
+      ansible.builtin.command:
+        cmd: >-
+          kubectl drain {{ inventory_hostname }}
+          --ignore-daemonsets
+          --delete-emptydir-data
+          --timeout=10m
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      environment:
+        KUBECONFIG: "{{ jb_kubeconfig }}"
+      changed_when: true
+      when: not jb_gvisor_already_installed
+
+    - name: Install gVisor
+      tags:
+        - gvisor
+        - gvisor_install
+      when: not jb_gvisor_already_installed
+      block:
+        - name: Install gVisor signing key
+          become: true
+          become_user: root
+          ansible.builtin.get_url:
+            url: https://gvisor.dev/archive.key
+            dest: /etc/apt/keyrings/gvisor.asc
+            mode: "0644"
+        - name: Configure gVisor apt repository
+          become: true
+          become_user: root
+          ansible.builtin.apt_repository:
+            repo: >-
+              deb [arch={{ jb_dpkg_arch }} signed-by=/etc/apt/keyrings/gvisor.asc]
+              https://storage.googleapis.com/gvisor/releases release main
+            filename: gvisor
+            state: present
+        - name: Install gVisor runtime package
+          become: true
+          become_user: root
+          ansible.builtin.apt:
+            name: runsc
+            state: present
+            update_cache: true
+    - name: Verify gVisor runtime binary
+      tags:
+        - gvisor
+        - gvisor_install
+      ansible.builtin.command:
+        cmd: runsc --version
+      changed_when: false
+      when: not jb_gvisor_already_installed
+
+    - name: List files installed by the gVisor package
+      tags:
+        - gvisor
+        - gvisor_install
+      ansible.builtin.command:
+        cmd: dpkg-query -L runsc
+      changed_when: false
+      register: jb_gvisor_package_files
+      when: not jb_gvisor_already_installed
+
+    - name: Verify gVisor containerd shim is installed
+      tags:
+        - gvisor
+        - gvisor_install
+      ansible.builtin.assert:
+        that:
+          - "'containerd-shim-runsc-v1' in jb_gvisor_package_files.stdout"
+        fail_msg: The runsc package did not install containerd-shim-runsc-v1.
+      when: not jb_gvisor_already_installed
+
+    - name: Configure containerd gVisor runtime handler
+      tags:
+        - gvisor
+        - gvisor_runtime
+      become: true
+      become_user: root
+      ansible.builtin.template:
+        src: etc-containerd-config.toml.j2
+        dest: /etc/containerd/config.toml
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart containerd
+
+    - name: Apply containerd configuration
+      tags:
+        - gvisor
+        - gvisor_runtime
+      ansible.builtin.meta: flush_handlers
+
+    - name: Wait for worker to become Ready after gVisor configuration
+      tags:
+        - gvisor
+        - gvisor_runtime
+      ansible.builtin.command:
+        cmd: >-
+          kubectl wait --for=condition=Ready
+          node/{{ inventory_hostname }}
+          --timeout=10m
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      environment:
+        KUBECONFIG: "{{ jb_kubeconfig }}"
+      changed_when: false
+
+    - name: Label gVisor-capable worker
+      tags:
+        - gvisor
+        - gvisor_runtime
+      ansible.builtin.command:
+        cmd: kubectl label node {{ inventory_hostname }} gvisor.dev/enabled=true --overwrite
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      environment:
+        KUBECONFIG: "{{ jb_kubeconfig }}"
+      changed_when: true
+
+    - name: Register gVisor RuntimeClass
+      tags:
+        - gvisor
+        - gvisor_runtimeclass
+      ansible.builtin.template:
+        src: gvisor-runtimeclass.yaml.j2
+        dest: /tmp/gvisor-runtimeclass.yaml
+        mode: "0644"
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      when: inventory_hostname == ansible_play_hosts_all[0]
+
+    - name: Apply gVisor RuntimeClass
+      tags:
+        - gvisor
+        - gvisor_runtimeclass
+      ansible.builtin.command:
+        cmd: kubectl apply -f /tmp/gvisor-runtimeclass.yaml
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      environment:
+        KUBECONFIG: "{{ jb_kubeconfig }}"
+      register: jb_gvisor_runtimeclass_apply
+      changed_when: >-
+        'created' in jb_gvisor_runtimeclass_apply.stdout or
+        'configured' in jb_gvisor_runtimeclass_apply.stdout
+      when: inventory_hostname == ansible_play_hosts_all[0]
+
+    - name: Uncordon worker after gVisor rollout
+      tags:
+        - gvisor
+        - gvisor_rollout
+      ansible.builtin.command:
+        cmd: kubectl uncordon {{ inventory_hostname }}
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      environment:
+        KUBECONFIG: "{{ jb_kubeconfig }}"
+      changed_when: true
+      when: not jb_gvisor_already_installed
+
+    - name: Create gVisor smoke Pod manifest
+      tags:
+        - gvisor
+        - gvisor_verify
+      ansible.builtin.template:
+        src: gvisor-smoke-pod.yaml.j2
+        dest: /tmp/gvisor-smoke-pod.yaml
+        mode: "0644"
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      when:
+        - not jb_gvisor_already_installed
+        - inventory_hostname == ansible_play_hosts_all[0]
+
+    - name: Create gVisor smoke Pod
+      tags:
+        - gvisor
+        - gvisor_verify
+      ansible.builtin.command:
+        cmd: kubectl apply -f /tmp/gvisor-smoke-pod.yaml
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      environment:
+        KUBECONFIG: "{{ jb_kubeconfig }}"
+      register: jb_gvisor_smoke_apply
+      changed_when: >-
+        'created' in jb_gvisor_smoke_apply.stdout or
+        'configured' in jb_gvisor_smoke_apply.stdout
+      when:
+        - not jb_gvisor_already_installed
+        - inventory_hostname == ansible_play_hosts_all[0]
+
+    - name: Wait for gVisor smoke Pod
+      tags:
+        - gvisor
+        - gvisor_verify
+      ansible.builtin.command:
+        cmd: kubectl wait --for=condition=Ready pod/gvisor-smoke --timeout=5m
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      environment:
+        KUBECONFIG: "{{ jb_kubeconfig }}"
+      changed_when: false
+      when:
+        - not jb_gvisor_already_installed
+        - inventory_hostname == ansible_play_hosts_all[0]
+
+    - name: Verify gVisor smoke Pod runtime
+      tags:
+        - gvisor
+        - gvisor_verify
+      ansible.builtin.command:
+        cmd: kubectl exec gvisor-smoke -- dmesg
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      environment:
+        KUBECONFIG: "{{ jb_kubeconfig }}"
+      changed_when: false
+      register: jb_gvisor_smoke_dmesg
+      when:
+        - not jb_gvisor_already_installed
+        - inventory_hostname == ansible_play_hosts_all[0]
+
+    - name: Assert gVisor smoke Pod runtime
+      tags:
+        - gvisor
+        - gvisor_verify
+      ansible.builtin.assert:
+        that:
+          - "'gVisor' in jb_gvisor_smoke_dmesg.stdout"
+        fail_msg: gVisor smoke Pod did not report a gVisor kernel.
+      when:
+        - not jb_gvisor_already_installed
+        - inventory_hostname == ansible_play_hosts_all[0]
+
+    - name: Remove gVisor smoke Pod
+      tags:
+        - gvisor
+        - gvisor_verify
+      ansible.builtin.command:
+        cmd: kubectl delete pod gvisor-smoke --ignore-not-found
+      delegate_to: "{{ jb_drain_host }}"
+      become: true
+      become_user: root
+      environment:
+        KUBECONFIG: "{{ jb_kubeconfig }}"
+      changed_when: true
+      when: inventory_hostname == ansible_play_hosts_all[0]
+  handlers:
+    - name: Restart containerd
+      tags:
+        - gvisor
+        - gvisor_runtime
+      become: true
+      become_user: root
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: restarted

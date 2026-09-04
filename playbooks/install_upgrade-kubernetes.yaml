@@ -1,11 +1,25 @@
 - name: K8s Worker and Master nodes Kubernetes installation
-  hosts: all
+  hosts: workers:x64-masters
+  serial: 1
+  vars_files:
+    - vars/k8s.yaml
   tasks:
     - name: Set DPKG architecture fact based on Ansible architecture
-      set_fact:
+      tags: always
+      ansible.builtin.set_fact:
         # Maps 'x86_64' to 'amd64', 'aarch64' to 'arm64', otherwise uses the raw fact
-        jb_dpkg_arch: "{{ 'amd64' if ansible_facts['architecture'] == 'x86_64' else ('arm64' if ansible_facts['architecture'] == 'aarch64' else ansible_facts['architecture']) }}"
+        jb_dpkg_arch: >-
+          {{ 'amd64' if ansible_facts['architecture'] == 'x86_64'
+             else ('arm64' if ansible_facts['architecture'] == 'aarch64'
+             else ansible_facts['architecture']) }}
+        jb_containerd_platform: >-
+          {{ 'linux/amd64' if ansible_facts['architecture'] == 'x86_64'
+             else ('linux/arm64/v8' if ansible_facts['architecture'] == 'aarch64'
+             else 'linux/' ~ ansible_facts['architecture']) }}
     - name: Containerd
+      tags:
+        - containerd
+        - containerd_v4
       block:
         - name: Containerd key
           become: true
@@ -22,76 +36,127 @@
             repo: "deb [arch={{ jb_dpkg_arch }} signed-by=/etc/apt/keyrings/containerd.asc] https://download.docker.com/linux/ubuntu {{ ansible_facts['distribution_release'] }} stable"
             state: present
     - name: K8s
+      tags:
+        - updatek8sbin
       block:
         - name: K8s key
           # Note - documentation suggests key remains static - need to validate this.
           become: true
           become_user: root
           ansible.builtin.get_url:
-            url: https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key
+            url: "https://pkgs.k8s.io/core:/stable:/v{{ jb_k8s_install_version }}/deb/Release.key"
             dest: /etc/apt/keyrings/k8s.asc
             mode: "0644"
-        - name: K8s Remove 1.29
+        - name: Remove old K8s repositories
           become: true
           become_user: root
           ansible.builtin.apt_repository:
-            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /"
+            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v{{ item }}/deb/ /"
             state: absent
             mode: "0644"
-        - name: K8s Remove 1.30
+          loop: "{{ jb_k8s_remove_versions }}"
+        - name: Install current K8s repository
           become: true
           become_user: root
           ansible.builtin.apt_repository:
-            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
-            state: absent
-            mode: "0644"
-        - name: K8s Remove 1.31
-          become: true
-          become_user: root
-          ansible.builtin.apt_repository:
-            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /"
-            state: absent
-            mode: "0644"
-        - name: K8s remove 1.32
-          become: true
-          become_user: root
-          ansible.builtin.apt_repository:
-            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /"
-            state: absent
-            mode: "0644"
-        - name: K8s Install 1.33
-          become: true
-          become_user: root
-          ansible.builtin.apt_repository:
-            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /"
+            repo: "deb [signed-by=/etc/apt/keyrings/k8s.asc] https://pkgs.k8s.io/core:/stable:/v{{ jb_k8s_install_version }}/deb/ /"
             state: present
             mode: "0644"
-      tags: 
-        - updatek8sbin
-    - name: Install Containerd.io
+    - name: Require control-plane outage acknowledgement
+      tags:
+        - containerd
+        - containerd_v4
+      ansible.builtin.assert:
+        that:
+          - >-
+            'masters' not in group_names
+            or (jb_allow_control_plane_containerd_restart | default(false) | bool)
+        fail_msg: >-
+          Restarting containerd on a control-plane node interrupts the Kubernetes
+          API. Re-run with -e jb_allow_control_plane_containerd_restart=true only
+          during an approved outage window.
+    - name: Verify Kubernetes API is ready before control-plane outage
+      tags:
+        - containerd
+        - containerd_v4
+      ansible.builtin.command:
+        cmd: kubectl get --raw=/readyz
+      changed_when: false
+      when: "'masters' in group_names"
+    - name: Install or upgrade Containerd.io for config version 4
+      tags:
+        - containerd
+        - containerd_v4
       become: true
       become_user: root
       ansible.builtin.apt:
         pkg:
           - containerd.io
-      notify:
-        - Configure Containerd
+        state: latest  # noqa package-latest -- config version 4 requires containerd 2.3+
+    - name: Verify containerd supports config version 4
+      tags:
+        - containerd
+        - containerd_v4
+      ansible.builtin.command:
+        cmd: containerd --version
+      changed_when: false
+      register: jb_containerd_version
+    - name: Require containerd 2.3 or newer for config version 4
+      tags:
+        - containerd
+        - containerd_v4
+      ansible.builtin.assert:
+        that:
+          - jb_containerd_version.stdout is search(' v?2[.](3|[4-9]|[1-9][0-9])[.]')
+        fail_msg: >-
+          Config version 4 requires containerd 2.3 or newer; found
+          {{ jb_containerd_version.stdout }}.
+    - name: Configure Containerd
+      tags:
+        - containerd
+        - containerd_v4
+      become: true
+      become_user: root
+      ansible.builtin.template:
+        src: etc-containerd-config.toml.j2
+        dest: /etc/containerd/config.toml
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Enable and Restart Containerd
+    - name: Apply containerd changes before control-plane recovery checks
+      tags:
+        - containerd
+        - containerd_v4
+      ansible.builtin.meta: flush_handlers
+    - name: Wait for Kubernetes API after control-plane containerd restart
+      tags:
+        - containerd
+        - containerd_v4
+      ansible.builtin.command:
+        cmd: kubectl get --raw=/readyz
+      changed_when: false
+      register: jb_control_plane_ready
+      retries: 60
+      delay: 5
+      until: jb_control_plane_ready.rc == 0
+      when: "'masters' in group_names"
     - name: Unhold Kubelet
       become: true
       become_user: root
-      ignore_errors: True
+      failed_when: false
       ansible.builtin.dpkg_selections:
         name: kubelet
         selection: install
     - name: Unhold kubeadm
-      ignore_errors: True
+      failed_when: false
       become: true
       become_user: root
       ansible.builtin.dpkg_selections:
         name: kubeadm
         selection: install
     - name: Unhold Kubectl
-      ignore_errors: True
+      failed_when: false
       become: true
       become_user: root
       ansible.builtin.dpkg_selections:
@@ -102,9 +167,9 @@
       become_user: root
       ansible.builtin.apt:
         pkg:
-          - kubelet=1.33.7-1.1
-          - kubeadm=1.33.7-1.1
-          - kubectl=1.33.7-1.1
+          - "kubelet={{ jb_k8s_package_version }}"
+          - "kubeadm={{ jb_k8s_package_version }}"
+          - "kubectl={{ jb_k8s_package_version }}"
       notify:
         - Reload kubelet
     - name: Run Node upgrades
@@ -113,28 +178,55 @@
       when: inventory_hostname in groups["workers"]
       ansible.builtin.command:
         cmd: kubeadm upgrade node
-      ignore_errors: true
-    - name: Hold kube versions after run
-      ansible.builtin.debug:
-        msg: holding kuelet, kubeadm and kubectl
-      notify:
-        - Hold kubelet
-        - Hold kubeadm
-        - Hold kubectl
-  handlers:
-      #Moved from raw to template file... cleaner
-    - name: Configure Containerd
+      changed_when: false
+      ignore_errors: true  # noqa ignore-errors
+    - name: Hold kubelet after install or upgrade
       become: true
       become_user: root
-      ansible.builtin.template: 
-        src: etc-containerd-config.toml.j2
-        dest: /etc/containerd/config.toml
-        owner: "root"
-        group: "root"
-        mode: "0644"
-      notify: Enable and Restart Containerd
+      ansible.builtin.dpkg_selections:
+        name: kubelet
+        selection: hold
+    - name: Hold kubeadm after install or upgrade
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubeadm
+        selection: hold
+    - name: Hold kubectl after install or upgrade
+      become: true
+      become_user: root
+      ansible.builtin.dpkg_selections:
+        name: kubectl
+        selection: hold
+
+    - name: Flush handlers before uncordoning
+      ansible.builtin.meta: flush_handlers
+
+    - name: Wait for node to become Ready in the cluster
+      ansible.builtin.command:
+        cmd: >-
+          kubectl wait --for=condition=Ready
+          node/{{ inventory_hostname }}
+          --timeout=10m
+      delegate_to: "{{ jb_drain_host }}"
+      changed_when: false
+      when:
+        - "'masters' not in group_names"
+        - jb_k8s_node_check.rc | default(1) == 0
+
+    - name: Uncordon node after kubernetes upgrade
+      ansible.builtin.command:
+        cmd: kubectl uncordon {{ inventory_hostname }}
+      delegate_to: "{{ jb_drain_host }}"
       changed_when: true
+      when:
+        - "'masters' not in group_names"
+        - jb_k8s_node_check.rc | default(1) == 0
+  handlers:
     - name: Enable and Restart Containerd
+      tags:
+        - containerd
+        - containerd_v4
       become: true
       become_user: root
       ansible.builtin.systemd_service:
