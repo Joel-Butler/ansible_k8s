@@ -115,6 +115,7 @@
       tags:
         - containerd
         - containerd_v4
+        - systemd_cgroups
       become: true
       become_user: root
       ansible.builtin.template:
@@ -128,6 +129,7 @@
       tags:
         - containerd
         - containerd_v4
+        - systemd_cgroups
       ansible.builtin.meta: flush_handlers
     - name: Wait for Kubernetes API after control-plane containerd restart
       tags:
@@ -172,6 +174,24 @@
           - "kubectl={{ jb_k8s_package_version }}"
       notify:
         - Reload kubelet
+    - name: Configure kubelet to use systemd cgroups
+      tags:
+        - kubelet
+        - cgroups
+        - systemd_cgroups
+      become: true
+      become_user: root
+      ansible.builtin.lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: '^cgroupDriver:'
+        line: 'cgroupDriver: systemd'
+        insertafter: EOF
+        create: true
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload kubelet
     - name: Run Node upgrades
       become: true
       become_user: root
@@ -199,8 +219,85 @@
         name: kubectl
         selection: hold
 
+    - name: Configure kube-apiserver service-account audiences
+      tags:
+        - kube-apiserver-audience
+      become: true
+      become_user: root
+      when: "'masters' in group_names"
+      block:
+        - name: Read kube-apiserver static pod manifest
+          ansible.builtin.slurp:
+            src: "{{ jb_kube_apiserver_manifest_path }}"
+          register: jb_kube_apiserver_manifest_before_audience
+        - name: Reject duplicate kube-apiserver API audience arguments
+          ansible.builtin.assert:
+            that:
+              - >-
+                (jb_kube_apiserver_manifest_before_audience.content | b64decode |
+                regex_findall('(?m)^\s*-\s*--api-audiences(?:=|\s)')) | length <= 1
+            fail_msg: >-
+              The kube-apiserver manifest contains duplicate --api-audiences
+              arguments; resolve them manually before running this playbook.
+        - name: Set kube-apiserver API audiences
+          ansible.builtin.lineinfile:
+            path: "{{ jb_kube_apiserver_manifest_path }}"
+            regexp: '^\s*-\s*--api-audiences(?:=|\s).*$'
+            line: "    - --api-audiences={{ jb_k8s_api_audiences | join(',') }}"
+            insertafter: '^\s*-\s*--service-account-issuer='
+            owner: root
+            group: root
+            mode: "0644"
+        - name: Verify kube-apiserver issuer and API audiences
+          ansible.builtin.slurp:
+            src: "{{ jb_kube_apiserver_manifest_path }}"
+          register: jb_kube_apiserver_manifest_after_audience
+        - name: Assert kube-apiserver issuer and API audiences are correct
+          ansible.builtin.assert:
+            that:
+              - >-
+                '--service-account-issuer=https://kubernetes.default.svc.cluster.local'
+                in (jb_kube_apiserver_manifest_after_audience.content | b64decode)
+              - >-
+                '--api-audiences=kubernetes.default.svc,https://kubernetes.default.svc.cluster.local'
+                in (jb_kube_apiserver_manifest_after_audience.content | b64decode)
+              - >-
+                ((jb_kube_apiserver_manifest_after_audience.content | b64decode) |
+                regex_findall('(?m)^\s*-\s*--api-audiences(?:=|\s)')) | length == 1
+            fail_msg: >-
+              kube-apiserver must retain the configured issuer and contain one
+              --api-audiences argument with both accepted audience values.
+
     - name: Flush handlers before uncordoning
       ansible.builtin.meta: flush_handlers
+
+    - name: Validate kubelet and containerd use systemd cgroups
+      tags:
+        - validate_cgroups
+        - systemd_cgroups
+      become: true
+      become_user: root
+      block:
+        - name: Read kubelet cgroup configuration
+          ansible.builtin.slurp:
+            src: /var/lib/kubelet/config.yaml
+          register: jb_kubelet_cgroup_config
+        - name: Read effective containerd configuration
+          ansible.builtin.command:
+            cmd: containerd config dump
+          register: jb_containerd_cgroup_config
+          changed_when: false
+        - name: Assert systemd cgroup configuration is active
+          ansible.builtin.assert:
+            that:
+              - >-
+                'cgroupDriver: systemd' in
+                (jb_kubelet_cgroup_config.content | b64decode)
+              - >-
+                'SystemdCgroup = true' in jb_containerd_cgroup_config.stdout
+            fail_msg: >-
+              Kubelet and containerd must both use systemd cgroups. Inspect
+              /var/lib/kubelet/config.yaml and `containerd config dump`.
 
     - name: Wait for node to become Ready in the cluster
       ansible.builtin.command:
@@ -227,6 +324,7 @@
       tags:
         - containerd
         - containerd_v4
+        - systemd_cgroups
       become: true
       become_user: root
       ansible.builtin.systemd_service:

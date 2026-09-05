@@ -9,3 +9,7 @@ jb_k8s_remove_versions:
 jb_k8s_install_version: "1.36"
 jb_k8s_package_version: "1.36.0-1.1"
 jb_drain_host: "k8s-master-amd"
+jb_k8s_api_audiences:
+  - "kubernetes.default.svc"
+  - "https://kubernetes.default.svc.cluster.local"
+jb_kube_apiserver_manifest_path: "/etc/kubernetes/manifests/kube-apiserver.yaml"
